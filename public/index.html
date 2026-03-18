@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI 产品助手 — 控制台</title>
+<!-- Markdown 渲染器（无需安装，CDN 加载） -->
+<script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #0f1117;
+    color: #e2e8f0;
+    min-height: 100vh;
+  }
+
+  /* ── 顶栏 ── */
+  header {
+    background: #1a1d2e;
+    border-bottom: 1px solid #2d3148;
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  header h1 { font-size: 18px; font-weight: 600; }
+  .badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-weight: 600;
+    letter-spacing: .5px;
+  }
+  .badge.running  { background: #14532d; color: #4ade80; }
+  .badge.stopped  { background: #450a0a; color: #f87171; }
+
+  /* ── 布局 ── */
+  .layout {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 0;
+    height: calc(100vh - 57px);
+  }
+
+  /* ── 侧栏 ── */
+  .sidebar {
+    background: #1a1d2e;
+    border-right: 1px solid #2d3148;
+    padding: 20px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+  .section-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #64748b;
+    margin-bottom: 12px;
+  }
+
+  /* 控制按钮 */
+  .btn {
+    width: 100%;
+    padding: 10px 0;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity .15s;
+  }
+  .btn:hover { opacity: .85; }
+  .btn.start  { background: #166534; color: #4ade80; }
+  .btn.stop   { background: #7f1d1d; color: #fca5a5; }
+
+  /* 开关 */
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid #2d3148;
+  }
+  .toggle-row:last-child { border-bottom: none; }
+  .toggle-label { font-size: 14px; }
+  .toggle-label small { display: block; color: #64748b; font-size: 11px; margin-top: 2px; }
+
+  /* iOS-style toggle */
+  .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; inset: 0;
+    background: #374151;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background .2s;
+  }
+  .slider:before {
+    content: '';
+    position: absolute;
+    width: 18px; height: 18px;
+    left: 3px; top: 3px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform .2s;
+  }
+  input:checked + .slider { background: #6366f1; }
+  input:checked + .slider:before { transform: translateX(20px); }
+
+  /* ── 主区域 ── */
+  .main {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* 测试面板 */
+  .test-panel {
+    padding: 20px 24px;
+    border-bottom: 1px solid #2d3148;
+    background: #13151f;
+  }
+  .test-panel h2 { font-size: 14px; color: #94a3b8; margin-bottom: 12px; }
+  .test-row { display: flex; gap: 8px; }
+  select, textarea, input[type=text] {
+    background: #1e2030;
+    border: 1px solid #2d3148;
+    color: #e2e8f0;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 14px;
+    outline: none;
+    transition: border-color .15s;
+  }
+  select:focus, textarea:focus { border-color: #6366f1; }
+  select { width: 130px; cursor: pointer; }
+  textarea {
+    flex: 1;
+    resize: vertical;
+    min-height: 60px;
+    font-family: inherit;
+  }
+  .send-btn {
+    padding: 8px 20px;
+    background: #6366f1;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    align-self: flex-end;
+    transition: background .15s;
+    white-space: nowrap;
+  }
+  .send-btn:hover { background: #4f46e5; }
+  .send-btn:disabled { background: #374151; cursor: not-allowed; }
+
+  /* 结果区 */
+  .result-box {
+    margin-top: 12px;
+    background: #1e2030;
+    border: 1px solid #2d3148;
+    border-radius: 8px;
+    padding: 12px;
+    font-size: 13px;
+    line-height: 1.7;
+    min-height: 40px;
+    max-height: 200px;
+    overflow-y: auto;
+    color: #cbd5e1;
+    white-space: pre-wrap;
+    display: none;
+  }
+  .result-box.visible { display: block; }
+
+  /* 日志区 */
+  .log-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 24px;
+  }
+  .log-area h2 { font-size: 13px; color: #64748b; margin-bottom: 12px; font-weight: 600; letter-spacing: .5px; }
+
+  .log-entry {
+    display: grid;
+    grid-template-columns: 150px 70px 1fr;
+    gap: 8px 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid #1e2030;
+    font-size: 12px;
+    line-height: 1.5;
+    align-items: start;
+  }
+  .log-time { color: #475569; font-variant-numeric: tabular-nums; }
+  .log-type {
+    padding: 1px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    text-align: center;
+    align-self: start;
+  }
+  .log-type.prd      { background: #1e3a5f; color: #60a5fa; }
+  .log-type.analyze  { background: #1e3a2f; color: #34d399; }
+  .log-type.review   { background: #3b2a1e; color: #fb923c; }
+  .log-type.system   { background: #2a1e3b; color: #c084fc; }
+  .log-type.config   { background: #1e2a3b; color: #94a3b8; }
+  .log-type.webhook  { background: #3b1e2a; color: #f472b6; }
+  .log-type.push     { background: #1e3328; color: #4ade80; }
+  .log-type\.generate-ui { background: #2a1e3b; color: #e879f9; }
+  .log-content { color: #94a3b8; }
+  .log-content .in  { color: #e2e8f0; }
+  .log-content .out { color: #64748b; margin-top: 2px; }
+
+  .empty-log { color: #374151; font-size: 13px; text-align: center; padding: 40px 0; }
+
+  /* 滚动条 */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #2d3148; border-radius: 3px; }
+
+  /* loading 动效 */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 2px solid #4f46e5;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin .6s linear infinite;
+    vertical-align: middle;
+    margin-right: 6px;
+  }
+
+  /* ── 结果操作栏 ── */
+  .result-actions {
+    display: none;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .result-actions.visible { display: flex; }
+  .action-btn {
+    padding: 5px 14px;
+    border: 1px solid #2d3148;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    background: #1e2030;
+    color: #94a3b8;
+    transition: all .15s;
+  }
+  .action-btn:hover { border-color: #6366f1; color: #818cf8; }
+  .action-btn.preview-btn { color: #60a5fa; border-color: #1e3a5f; }
+  .action-btn.preview-btn:hover { background: #1e3a5f; }
+  .action-btn.download-btn { color: #34d399; border-color: #1e3a2f; }
+  .action-btn.download-btn:hover { background: #1e3a2f; }
+  .action-btn.export-btn { color: #fbbf24; border-color: #3b2e1e; }
+  .action-btn.export-btn:hover { background: #3b2e1e; }
+  .action-btn.push-btn { color: #4ade80; border-color: #1e3328; }
+  .action-btn.push-btn:hover { background: #1e3328; }
+  .action-btn.push-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+  /* 推送状态提示 */
+  .push-tip {
+    font-size: 11px;
+    color: #475569;
+    margin-top: 6px;
+    display: none;
+  }
+  .push-tip.visible { display: block; }
+  .push-tip.ok  { color: #4ade80; }
+  .push-tip.err { color: #f87171; }
+
+  /* ── Markdown 预览弹窗 ── */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.7);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: #1a1d2e;
+    border: 1px solid #2d3148;
+    border-radius: 12px;
+    width: 100%;
+    max-width: 820px;
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid #2d3148;
+    flex-shrink: 0;
+  }
+  .modal-header span { font-size: 14px; font-weight: 600; color: #e2e8f0; }
+  .modal-header-actions { display: flex; gap: 8px; align-items: center; }
+  .modal-close {
+    background: none;
+    border: none;
+    color: #64748b;
+    font-size: 20px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  .modal-close:hover { color: #e2e8f0; background: #2d3148; }
+  .modal-body {
+    overflow-y: auto;
+    padding: 24px 28px;
+    flex: 1;
+  }
+
+  /* ── Markdown 内容样式 ── */
+  .md-content { color: #cbd5e1; line-height: 1.8; font-size: 14px; }
+  .md-content h1 { font-size: 22px; font-weight: 700; color: #e2e8f0; margin: 0 0 20px; padding-bottom: 10px; border-bottom: 2px solid #2d3148; }
+  .md-content h2 { font-size: 17px; font-weight: 700; color: #e2e8f0; margin: 28px 0 12px; padding-bottom: 6px; border-bottom: 1px solid #2d3148; }
+  .md-content h3 { font-size: 15px; font-weight: 600; color: #94a3b8; margin: 20px 0 8px; }
+  .md-content h4 { font-size: 13px; font-weight: 600; color: #64748b; margin: 14px 0 6px; text-transform: uppercase; letter-spacing: .5px; }
+  .md-content p { margin: 0 0 12px; }
+  .md-content ul, .md-content ol { margin: 8px 0 12px 20px; }
+  .md-content li { margin-bottom: 4px; }
+  .md-content strong { color: #e2e8f0; font-weight: 600; }
+  .md-content em { color: #94a3b8; }
+  .md-content code {
+    background: #0f1117;
+    border: 1px solid #2d3148;
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 12px;
+    color: #a78bfa;
+  }
+  .md-content pre {
+    background: #0f1117;
+    border: 1px solid #2d3148;
+    border-radius: 8px;
+    padding: 16px;
+    overflow-x: auto;
+    margin: 12px 0;
+  }
+  .md-content pre code { background: none; border: none; padding: 0; color: #e2e8f0; font-size: 13px; }
+  .md-content blockquote {
+    border-left: 3px solid #6366f1;
+    margin: 12px 0;
+    padding: 8px 16px;
+    background: #1e2030;
+    border-radius: 0 6px 6px 0;
+    color: #94a3b8;
+  }
+  .md-content table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+  .md-content th {
+    background: #1e2030;
+    color: #94a3b8;
+    font-weight: 600;
+    text-align: left;
+    padding: 8px 12px;
+    border: 1px solid #2d3148;
+  }
+  .md-content td { padding: 7px 12px; border: 1px solid #2d3148; color: #cbd5e1; }
+  .md-content tr:nth-child(even) td { background: #1a1d2e; }
+  .md-content hr { border: none; border-top: 1px solid #2d3148; margin: 20px 0; }
+  .md-content a { color: #6366f1; text-decoration: none; }
+  .md-content a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>AI 产品助手</h1>
+  <span class="badge running" id="statusBadge">运行中</span>
+  <span style="margin-left:auto; font-size:12px; color:#475569;">V1.0</span>
+</header>
+
+<div class="layout">
+
+  <!-- ── 侧栏 ── -->
+  <aside class="sidebar">
+
+    <!-- 系统控制 -->
+    <div>
+      <div class="section-title">系统控制</div>
+      <button class="btn stop" id="toggleBtn" onclick="toggleSystem()">停止系统</button>
+    </div>
+
+    <!-- 功能开关 -->
+    <div>
+      <div class="section-title">功能开关</div>
+      <div class="toggle-row">
+        <div class="toggle-label">
+          PRD 生成
+          <small>/prd 指令</small>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="feat-prd" onchange="updateConfig()">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="toggle-row">
+        <div class="toggle-label">
+          数据分析
+          <small>/analyze 指令</small>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="feat-analyze" onchange="updateConfig()">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="toggle-row">
+        <div class="toggle-label">
+          技术评审
+          <small>/review 指令</small>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="feat-review" onchange="updateConfig()">
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- AI 模型 -->
+    <div>
+      <div class="section-title">AI 模型</div>
+      <div class="toggle-row">
+        <div class="toggle-label">
+          MaxClaw
+          <small>MiniMax API</small>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="model-maxclaw" onchange="updateConfig()">
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Webhook 提示 -->
+    <div>
+      <div class="section-title">Webhook</div>
+      <div style="font-size:12px; color:#475569; line-height:1.8;">
+        POST <span style="color:#6366f1;">localhost:3000/webhook</span><br>
+        指令格式：<br>
+        <span style="color:#4ade80;">/prd</span> 需求描述<br>
+        <span style="color:#34d399;">/analyze</span> 数据内容<br>
+        <span style="color:#fb923c;">/review</span> 技术方案
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- ── 主区域 ── -->
+  <div class="main">
+
+    <!-- 测试面板 -->
+    <div class="test-panel">
+      <h2>控制台测试</h2>
+      <div class="test-row">
+        <select id="chatType">
+          <option value="prd">PRD 生成</option>
+          <option value="analyze">数据分析</option>
+          <option value="review">技术评审</option>
+        </select>
+        <textarea id="chatInput" placeholder="输入内容，直接调用 AI…"></textarea>
+        <button class="send-btn" id="sendBtn" onclick="sendChat()">发送</button>
+      </div>
+      <div class="result-box" id="resultBox"></div>
+      <div class="result-actions" id="resultActions">
+        <button class="action-btn preview-btn" onclick="openPreview()">⬜ Open Preview</button>
+        <button class="action-btn download-btn" onclick="downloadMd()">↓ 下载 .md</button>
+        <button class="action-btn export-btn" id="exportHtmlBtn" onclick="exportStaticPage()" style="display:none;">⚡ 生成静态页面</button>
+        <button class="action-btn push-btn" id="pushBtn" onclick="pushToGroup()" style="display:none;">↗ 推送到群</button>
+      </div>
+      <div class="push-tip" id="pushTip"></div>
+    </div>
+
+    <!-- 日志 -->
+    <div class="log-area">
+      <h2>OPERATION LOG</h2>
+      <div id="logList"><div class="empty-log">暂无日志</div></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Markdown 预览弹窗 ── -->
+<div class="modal-overlay" id="previewModal" onclick="closePreviewOnBackdrop(event)">
+  <div class="modal">
+    <div class="modal-header">
+      <span id="previewTitle">预览</span>
+      <div class="modal-header-actions">
+        <button class="action-btn download-btn" onclick="downloadMd()">↓ 下载 .md</button>
+        <button class="modal-close" onclick="closePreview()">×</button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="md-content" id="previewContent"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── 当前 AI 结果（用于 preview 和 download） ──────────────────
+let lastResult = { type: 'prd', text: '' };
+
+// ── Markdown 预览 ─────────────────────────────────────────────
+function openPreview() {
+  if (!lastResult.text) return;
+  const typeLabel = { prd: 'PRD', analyze: '数据分析', review: '技术评审' };
+  document.getElementById('previewTitle').textContent =
+    `${typeLabel[lastResult.type] || lastResult.type} — Markdown 预览`;
+  document.getElementById('previewContent').innerHTML =
+    marked.parse(lastResult.text);
+  document.getElementById('previewModal').classList.add('open');
+}
+
+function closePreview() {
+  document.getElementById('previewModal').classList.remove('open');
+}
+
+function closePreviewOnBackdrop(e) {
+  if (e.target === document.getElementById('previewModal')) closePreview();
+}
+
+// ── 下载 .md 文件 ─────────────────────────────────────────────
+function downloadMd() {
+  if (!lastResult.text) return;
+  const typeLabel = { prd: 'PRD', analyze: '数据分析', review: '技术评审' };
+  const now = new Date();
+  const ts = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
+  const filename = `${typeLabel[lastResult.type] || lastResult.type}_${ts}.md`;
+  const blob = new Blob([lastResult.text], { type: 'text/markdown;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ── 根据 PRD 生成前端静态页面 ─────────────────────────────────
+async function exportStaticPage() {
+  if (!lastResult.text || lastResult.type !== 'prd') return;
+
+  const btn = document.getElementById('exportHtmlBtn');
+  btn.disabled = true;
+  btn.textContent = '生成中… (约30-60s)';
+
+  try {
+    const res = await fetch('/api/generate-ui', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prd: lastResult.text }),
+    });
+    const data = await res.json();
+    if (data.error) { alert('生成失败：' + data.error); return; }
+
+    const now = new Date();
+    const ts = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
+    const blob = new Blob([data.html], { type: 'text/html;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `UI_${ts}.html`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    loadLogs();
+  } catch (e) {
+    alert('请求失败：' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '⚡ 生成静态页面';
+  }
+}
+
+// ── 推送到企业微信群 ──────────────────────────────────────────
+let pushConfigured = false;
+
+async function checkPushStatus() {
+  const res = await fetch('/api/push-status');
+  const { configured } = await res.json();
+  pushConfigured = configured;
+}
+
+async function pushToGroup() {
+  if (!lastResult.text || !pushConfigured) return;
+  const btn = document.getElementById('pushBtn');
+  const tip = document.getElementById('pushTip');
+
+  btn.disabled = true;
+  btn.textContent = '推送中…';
+  tip.className = 'push-tip';
+
+  try {
+    const res = await fetch('/api/push-to-group', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: lastResult.type, content: lastResult.text }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      tip.textContent = data.truncated ? '✓ 已推送（内容较长已截断，完整版请下载 .md）' : '✓ 已成功推送到企业微信群';
+      tip.className = 'push-tip visible ok';
+    } else {
+      tip.textContent = '✕ 推送失败：' + (data.error || '未知错误');
+      tip.className = 'push-tip visible err';
+    }
+    loadLogs();
+  } catch (e) {
+    tip.textContent = '✕ 请求失败：' + e.message;
+    tip.className = 'push-tip visible err';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '↗ 推送到群';
+    setTimeout(() => { tip.className = 'push-tip'; }, 5000);
+  }
+}
+
+// ── 初始化 ────────────────────────────────────────────────────
+async function init() {
+  const res = await fetch('/api/status');
+  const { running, config } = await res.json();
+  applyStatus(running);
+  applyConfig(config);
+  await checkPushStatus();
+  loadLogs();
+}
+
+function applyStatus(running) {
+  const badge = document.getElementById('statusBadge');
+  const btn   = document.getElementById('toggleBtn');
+  badge.textContent = running ? '运行中' : '已停止';
+  badge.className   = `badge ${running ? 'running' : 'stopped'}`;
+  btn.textContent   = running ? '停止系统' : '启动系统';
+  btn.className     = `btn ${running ? 'stop' : 'start'}`;
+}
+
+function applyConfig(cfg) {
+  document.getElementById('feat-prd').checked     = cfg.features.prd;
+  document.getElementById('feat-analyze').checked = cfg.features.analyze;
+  document.getElementById('feat-review').checked  = cfg.features.review;
+  document.getElementById('model-maxclaw').checked = cfg.model.maxclaw;
+}
+
+// ── 系统启停 ──────────────────────────────────────────────────
+async function toggleSystem() {
+  const res  = await fetch('/api/toggle', { method: 'POST' });
+  const data = await res.json();
+  applyStatus(data.running);
+  loadLogs();
+}
+
+// ── 配置同步 ──────────────────────────────────────────────────
+async function updateConfig() {
+  const body = {
+    features: {
+      prd:     document.getElementById('feat-prd').checked,
+      analyze: document.getElementById('feat-analyze').checked,
+      review:  document.getElementById('feat-review').checked,
+    },
+    model: {
+      maxclaw: document.getElementById('model-maxclaw').checked,
+    }
+  };
+  await fetch('/api/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  loadLogs();
+}
+
+// ── 控制台发送 ────────────────────────────────────────────────
+async function sendChat() {
+  const type  = document.getElementById('chatType').value;
+  const text  = document.getElementById('chatInput').value.trim();
+  if (!text) return;
+
+  const btn    = document.getElementById('sendBtn');
+  const result = document.getElementById('resultBox');
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>生成中…';
+  result.className = 'result-box visible';
+  result.textContent = '正在调用 AI，请稍候…';
+
+  const actions = document.getElementById('resultActions');
+  actions.classList.remove('visible');
+
+  try {
+    const res  = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, text }),
+    });
+    const data = await res.json();
+    if (data.result) {
+      result.textContent = data.result;
+      lastResult = { type, text: data.result };
+      actions.classList.add('visible');
+      document.getElementById('exportHtmlBtn').style.display = type === 'prd' ? 'inline-block' : 'none';
+      const pushBtn = document.getElementById('pushBtn');
+      pushBtn.style.display = 'inline-block';
+      if (!pushConfigured) {
+        pushBtn.disabled = true;
+        pushBtn.title = '请在 .env 中配置 WECHAT_WEBHOOK_URL';
+        pushBtn.style.opacity = '0.4';
+        pushBtn.style.cursor = 'not-allowed';
+      } else {
+        pushBtn.disabled = false;
+        pushBtn.title = '';
+        pushBtn.style.opacity = '';
+        pushBtn.style.cursor = '';
+      }
+      document.getElementById('pushTip').className = 'push-tip';
+    } else {
+      result.textContent = data.error || '（无返回）';
+    }
+  } catch (e) {
+    result.textContent = '请求失败：' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '发送';
+    loadLogs();
+  }
+}
+
+// ── 日志渲染 ──────────────────────────────────────────────────
+async function loadLogs() {
+  const res  = await fetch('/api/logs');
+  const logs = await res.json();
+  const el   = document.getElementById('logList');
+
+  if (!logs.length) {
+    el.innerHTML = '<div class="empty-log">暂无日志</div>';
+    return;
+  }
+
+  el.innerHTML = logs.map(l => `
+    <div class="log-entry">
+      <span class="log-time">${l.time}</span>
+      <span class="log-type ${l.type}">${l.type.toUpperCase()}</span>
+      <div class="log-content">
+        <div class="in">${esc(l.input)}</div>
+        <div class="out">${esc(l.output)}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function esc(s) {
+  return String(s)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;');
+}
+
+// ── 回车发送 ──────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('chatInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) sendChat();
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closePreview();
+  });
+  init();
+  setInterval(loadLogs, 5000); // 每 5 秒刷新日志
+});
+</script>
+</body>
+</html>

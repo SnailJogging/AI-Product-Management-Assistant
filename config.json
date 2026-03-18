@@ -1,0 +1,10 @@
+{
+  "features": {
+    "prd": true,
+    "analyze": true,
+    "review": true
+  },
+  "model": {
+    "maxclaw": true
+  }
+}
