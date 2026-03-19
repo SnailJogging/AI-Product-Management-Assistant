@@ -378,6 +378,38 @@
   .md-content hr { border: none; border-top: 1px solid #2d3148; margin: 20px 0; }
   .md-content a { color: #6366f1; text-decoration: none; }
   .md-content a:hover { text-decoration: underline; }
+
+  /* ── 探索结果分析面板 ── */
+  .explore-panel {
+    padding: 16px 24px;
+    border-bottom: 1px solid #2d3148;
+    background: #0f1117;
+  }
+  .explore-panel h2 { font-size: 14px; color: #94a3b8; margin-bottom: 12px; }
+  .explore-row { display: flex; gap: 8px; }
+  .explore-row + .explore-row { margin-top: 8px; }
+  .btn-mermaid { background: #1e3a5f; color: #60a5fa; }
+  .btn-mermaid:hover { background: #1e4a7f; }
+  .btn-ask     { background: #1a3b2a; color: #34d399; }
+  .btn-ask:hover { background: #1a4b35; }
+  .mermaid-pre {
+    background: #0f1117;
+    border: 1px solid #2d3148;
+    border-radius: 8px;
+    padding: 16px;
+    overflow-x: auto;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 12px;
+    color: #e2e8f0;
+    line-height: 1.6;
+    margin: 0;
+  }
+  .mermaid-hint {
+    margin-top: 10px;
+    font-size: 12px;
+    color: #475569;
+  }
+  .mermaid-hint a { color: #6366f1; }
 </style>
 </head>
 <body>
@@ -432,6 +464,16 @@
           <span class="slider"></span>
         </label>
       </div>
+      <div class="toggle-row">
+        <div class="toggle-label">
+          页面探索
+          <small>BFS + AI 决策</small>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="feat-explore" onchange="updateConfig()">
+          <span class="slider"></span>
+        </label>
+      </div>
     </div>
 
     <!-- AI 模型 -->
@@ -470,10 +512,11 @@
     <div class="test-panel">
       <h2>控制台测试</h2>
       <div class="test-row">
-        <select id="chatType">
+        <select id="chatType" onchange="onTypeChange(this.value)">
           <option value="prd">PRD 生成</option>
           <option value="analyze">数据分析</option>
           <option value="review">技术评审</option>
+          <option value="explore">页面探索</option>
         </select>
         <textarea id="chatInput" placeholder="输入内容，直接调用 AI…"></textarea>
         <button class="send-btn" id="sendBtn" onclick="sendChat()">发送</button>
@@ -486,6 +529,31 @@
         <button class="action-btn push-btn" id="pushBtn" onclick="pushToGroup()" style="display:none;">↗ 推送到群</button>
       </div>
       <div class="push-tip" id="pushTip"></div>
+    </div>
+
+    <!-- 探索结果分析面板（仅在选择"页面探索"时显示） -->
+    <div class="explore-panel" id="explorePanelSection" style="display:none;">
+      <h2>探索结果分析</h2>
+
+      <!-- Task ID + 生成PRD / 流程图 -->
+      <div class="explore-row">
+        <input type="text" id="exploreTaskId" placeholder="输入 Task ID（exp_xxx）" style="flex:1; min-width:0;" />
+        <button class="send-btn" id="prdBtn" onclick="generatePrd()">生成 PRD</button>
+        <button class="send-btn btn-mermaid" id="mermaidBtn" onclick="viewMermaid()">查看流程图</button>
+      </div>
+
+      <!-- 问答 -->
+      <div class="explore-row">
+        <input type="text" id="askInput" placeholder="提问，如：如何创建订单？" style="flex:1;" />
+        <button class="send-btn btn-ask" id="askBtn" onclick="askQuestion()">提问</button>
+      </div>
+
+      <!-- 结果展示 -->
+      <div class="result-box" id="exploreResult"></div>
+      <div class="result-actions" id="exploreActions">
+        <button class="action-btn preview-btn" onclick="openExplorePreview()">⬜ 预览 PRD</button>
+        <button class="action-btn download-btn" onclick="downloadExploreMd()">↓ 下载 .md</button>
+      </div>
     </div>
 
     <!-- 日志 -->
@@ -628,6 +696,184 @@ async function pushToGroup() {
   }
 }
 
+// ── 下拉类型切换 ──────────────────────────────────────────────
+function onTypeChange(type) {
+  const panel   = document.getElementById('explorePanelSection');
+  const input   = document.getElementById('chatInput');
+  const sendBtn = document.getElementById('sendBtn');
+
+  if (type === 'explore') {
+    panel.style.display   = 'block';
+    input.placeholder     = '输入要探索的网址，如 https://example.com';
+    input.style.minHeight = '40px';
+    sendBtn.textContent   = '开始探索';
+  } else {
+    panel.style.display   = 'none';
+    input.placeholder     = '输入内容，直接调用 AI…';
+    input.style.minHeight = '';
+    sendBtn.textContent   = '发送';
+  }
+}
+
+// ── 页面探索发送 ──────────────────────────────────────────────
+async function sendExplore() {
+  const url = document.getElementById('chatInput').value.trim();
+  if (!url) return;
+
+  const btn    = document.getElementById('sendBtn');
+  const result = document.getElementById('resultBox');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>启动中…';
+  result.className = 'result-box visible';
+  result.textContent = '正在创建探索任务…';
+  document.getElementById('resultActions').classList.remove('visible');
+
+  try {
+    const res  = await fetch('/explore/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    const data = await res.json();
+    if (data.error) { result.textContent = '错误：' + data.error; return; }
+
+    const taskId = data.taskId;
+    // 自动填入探索结果面板的 TaskID 输入框
+    document.getElementById('exploreTaskId').value = taskId;
+    result.textContent = `任务已创建：${taskId}\n状态：running\n\n后台探索中，自动刷新进度…`;
+    pollExploreTask(taskId, result);
+    loadLogs();
+  } catch (e) {
+    result.textContent = '请求失败：' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '开始探索';
+  }
+}
+
+function pollExploreTask(taskId, resultEl) {
+  const timer = setInterval(async () => {
+    try {
+      const res  = await fetch(`/explore/${taskId}`);
+      const task = await res.json();
+      resultEl.textContent = [
+        `任务 ID ：${task.taskId}`,
+        `状  态 ：${task.status}`,
+        `已执行步骤：${task.currentStep}`,
+        `已发现页面：${(task.visited  || []).length}`,
+        `已抓取接口：${(task.apis     || []).length}`,
+        task.steps.length ? `\n最新操作：${task.steps[task.steps.length - 1]}` : '',
+      ].filter(Boolean).join('\n');
+
+      if (task.status === 'done' || task.status === 'error') {
+        clearInterval(timer);
+        if (task.status === 'done') {
+          resultEl.textContent += '\n\n✓ 探索完成！可使用下方"探索结果分析"面板生成 PRD 或提问。';
+        }
+        loadLogs();
+      }
+    } catch (_) {}
+  }, 5000);
+}
+
+// ── 探索结果分析 ──────────────────────────────────────────────
+let exploreCache = { prd: '', mermaid: '', taskId: '' };
+
+async function generatePrd() {
+  const taskId = document.getElementById('exploreTaskId').value.trim();
+  if (!taskId) return;
+
+  const btn = document.getElementById('prdBtn');
+  const box = document.getElementById('exploreResult');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>生成中…';
+  box.className = 'result-box visible';
+  box.textContent = '正在生成 PRD，请稍候（首次约 10-30s）…';
+  document.getElementById('exploreActions').classList.remove('visible');
+
+  try {
+    const res  = await fetch('/generate-prd', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ taskId }),
+    });
+    const data = await res.json();
+    if (data.error) { box.textContent = '错误：' + data.error; return; }
+
+    exploreCache = { prd: data.prd, mermaid: data.mermaid, taskId };
+    box.textContent = data.prd;
+    document.getElementById('exploreActions').classList.add('visible');
+    loadLogs();
+  } catch (e) {
+    box.textContent = '请求失败：' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '生成 PRD';
+  }
+}
+
+function viewMermaid() {
+  if (!exploreCache.mermaid) {
+    alert('请先点击"生成 PRD"以获取流程图数据');
+    return;
+  }
+  document.getElementById('previewTitle').textContent = `页面流程图 — ${exploreCache.taskId}`;
+  document.getElementById('previewContent').innerHTML =
+    `<pre class="mermaid-pre">${esc(exploreCache.mermaid)}</pre>` +
+    `<p class="mermaid-hint">复制上方代码，粘贴到 <a href="https://mermaid.live" target="_blank">mermaid.live</a> 可查看图形化流程图</p>`;
+  document.getElementById('previewModal').classList.add('open');
+}
+
+async function askQuestion() {
+  const taskId   = document.getElementById('exploreTaskId').value.trim();
+  const question = document.getElementById('askInput').value.trim();
+  if (!taskId || !question) return;
+
+  const btn = document.getElementById('askBtn');
+  const box = document.getElementById('exploreResult');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>思考中…';
+  box.className = 'result-box visible';
+  box.textContent = '正在分析，请稍候…';
+  document.getElementById('exploreActions').classList.remove('visible');
+
+  try {
+    const res  = await fetch('/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ taskId, question }),
+    });
+    const data = await res.json();
+    if (data.error) { box.textContent = '错误：' + data.error; return; }
+    box.textContent = data.answer;
+    loadLogs();
+  } catch (e) {
+    box.textContent = '请求失败：' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '提问';
+  }
+}
+
+function openExplorePreview() {
+  if (!exploreCache.prd) return;
+  document.getElementById('previewTitle').textContent = `探索 PRD — ${exploreCache.taskId}`;
+  document.getElementById('previewContent').innerHTML = marked.parse(exploreCache.prd);
+  document.getElementById('previewModal').classList.add('open');
+}
+
+function downloadExploreMd() {
+  if (!exploreCache.prd) return;
+  const now = new Date();
+  const ts  = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}`;
+  const blob = new Blob([exploreCache.prd], { type: 'text/markdown;charset=utf-8' });
+  const a    = document.createElement('a');
+  a.href     = URL.createObjectURL(blob);
+  a.download = `ExplorePRD_${exploreCache.taskId}_${ts}.md`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 // ── 初始化 ────────────────────────────────────────────────────
 async function init() {
   const res = await fetch('/api/status');
@@ -651,6 +897,7 @@ function applyConfig(cfg) {
   document.getElementById('feat-prd').checked     = cfg.features.prd;
   document.getElementById('feat-analyze').checked = cfg.features.analyze;
   document.getElementById('feat-review').checked  = cfg.features.review;
+  document.getElementById('feat-explore').checked = cfg.features.explore ?? true;
   document.getElementById('model-maxclaw').checked = cfg.model.maxclaw;
 }
 
@@ -669,6 +916,7 @@ async function updateConfig() {
       prd:     document.getElementById('feat-prd').checked,
       analyze: document.getElementById('feat-analyze').checked,
       review:  document.getElementById('feat-review').checked,
+      explore: document.getElementById('feat-explore').checked,
     },
     model: {
       maxclaw: document.getElementById('model-maxclaw').checked,
@@ -685,6 +933,8 @@ async function updateConfig() {
 // ── 控制台发送 ────────────────────────────────────────────────
 async function sendChat() {
   const type  = document.getElementById('chatType').value;
+  if (type === 'explore') return sendExplore();   // 探索类型走独立流程
+
   const text  = document.getElementById('chatInput').value.trim();
   if (!text) return;
 
@@ -775,8 +1025,10 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') closePreview();
   });
+  // 初始化时根据下拉当前值决定面板可见性
+  onTypeChange(document.getElementById('chatType').value);
   init();
-  setInterval(loadLogs, 5000); // 每 5 秒刷新日志
+  setInterval(loadLogs, 5000);
 });
 </script>
 </body>

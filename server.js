@@ -5,6 +5,8 @@ const fs      = require('fs');
 const path    = require('path');
 
 const { callAI } = require('./services/aiService');
+const { createTask, getTask, saveTask, runTaskInBackground, resumeInterruptedTasks } = require('./task/manager');
+const { graphToMermaid } = require('./util/graphToMermaid');
 
 const app         = express();
 const PORT        = process.env.PORT || 3000;
@@ -194,6 +196,108 @@ app.post('/api/generate-ui', async (req, res) => {
   res.json({ html: cleaned });
 });
 
+// ─── 任务系统（Task Manager） ──────────────────────────────────
+
+// 创建探索任务
+app.post('/explore/start', (req, res) => {
+  const { url } = req.body;
+  if (!url) return res.status(400).json({ error: '缺少 url 参数' });
+
+  const task = createTask(url);
+  saveTask(task);
+  addLog('explore', url, `任务已创建 ${task.taskId}`);
+  res.json({ taskId: task.taskId });
+
+  // 创建完成后立即在后台启动，不阻塞响应
+  runTaskInBackground(task.taskId);
+});
+
+// 查询探索任务详情
+app.get('/explore/:id', (req, res) => {
+  const task = getTask(req.params.id);
+  if (!task) return res.status(404).json({ error: '任务不存在' });
+  res.json(task);
+});
+
+// 恢复中断任务
+app.post('/explore/:id/resume', (req, res) => {
+  const task = getTask(req.params.id);
+  if (!task) return res.status(404).json({ error: '任务不存在' });
+  if (task.status === 'running') return res.status(409).json({ error: '任务正在运行中' });
+  if (task.status === 'done')    return res.status(400).json({ error: '任务已完成，无需恢复' });
+
+  addLog('explore', task.url, `手动恢复任务 ${task.taskId} (currentStep: ${task.currentStep || 0})`);
+  runTaskInBackground(task.taskId);
+  res.json({ ok: true, taskId: task.taskId, currentStep: task.currentStep || 0 });
+});
+
+// ─── 探索结果分析（Phase 8） ───────────────────────────────────
+
+// 生成 PRD（含 Mermaid 流程图），结果缓存到 task.prd / task.mermaid
+app.post('/generate-prd', async (req, res) => {
+  const { taskId } = req.body;
+  if (!taskId) return res.status(400).json({ error: '缺少 taskId 参数' });
+
+  const task = getTask(taskId);
+  if (!task) return res.status(404).json({ error: '任务不存在' });
+  if (task.status !== 'done') return res.status(400).json({ error: `任务未完成（当前状态：${task.status}）` });
+
+  // Mermaid 本地生成，无需 AI
+  if (!task.mermaid) {
+    task.mermaid = graphToMermaid(task.graph);
+    saveTask(task);
+  }
+
+  // PRD 缓存命中
+  if (task.prd) {
+    return res.json({ prd: task.prd, mermaid: task.mermaid, cached: true });
+  }
+
+  // 构建 AI 输入（步骤截前 50 条，避免爆 token）
+  const stepsText = (task.steps || []).slice(0, 50).join('\n') || '无';
+  const graphText = JSON.stringify(task.graph || {});
+  const apisText  = (task.apis || []).map(a => `${a.method} ${a.url} (${a.status})`).join('\n') || '无';
+  const prompt    = `【业务流程】\n${stepsText}\n\n【页面结构】\n${graphText}\n\n【接口信息】\n${apisText}`;
+
+  const aiResult = await callAI('explore-prd', prompt, { max_tokens: 3000 });
+  if (!aiResult.success) {
+    addLog('explore', taskId, `[PRD生成失败] ${aiResult.error}`);
+    return res.status(500).json({ error: aiResult.error });
+  }
+
+  task.prd = aiResult.content;
+  saveTask(task);
+  addLog('explore', taskId, `PRD 生成完成（${task.prd.length} 字）`);
+  res.json({ prd: task.prd, mermaid: task.mermaid, cached: false });
+});
+
+// 知识库问答：基于任务探索数据回答问题
+app.post('/ask', async (req, res) => {
+  const { taskId, question } = req.body;
+  if (!taskId || !question) return res.status(400).json({ error: '缺少 taskId 或 question 参数' });
+
+  const task = getTask(taskId);
+  if (!task) return res.status(404).json({ error: '任务不存在' });
+
+  const stepsText = (task.steps || []).slice(0, 50).join('\n') || '无';
+  const graphText = JSON.stringify(task.graph || {});
+  const apisText  = (task.apis || []).map(a => `${a.method} ${a.url} (${a.status})`).join('\n') || '无';
+  const prdExtra  = task.prd ? `\n\n【已生成PRD摘要】\n${task.prd.slice(0, 800)}` : '';
+
+  const context =
+    `操作步骤：\n${stepsText}\n\n页面关系：\n${graphText}\n\n接口信息：\n${apisText}${prdExtra}`;
+  const prompt  = `${context}\n\n问题：\n${question}`;
+
+  const aiResult = await callAI('ask', prompt, { max_tokens: 1000 });
+  if (!aiResult.success) {
+    addLog('ask', question, `[失败] ${aiResult.error}`);
+    return res.status(500).json({ error: aiResult.error });
+  }
+
+  addLog('ask', question.slice(0, 80), aiResult.content);
+  res.json({ answer: aiResult.content });
+});
+
 // ─── Webhook（企业微信） ───────────────────────────────────────
 app.post('/webhook', async (req, res) => {
   // 先回 200，防止企业微信超时重试
@@ -250,4 +354,7 @@ app.listen(PORT, () => {
   if (!MINIMAX_API_KEY) {
     console.warn('\n⚠️  未检测到 MINIMAX_API_KEY，请复制 .env.example 为 .env 并填入 API Key\n');
   }
+
+  // 自动恢复中断任务
+  resumeInterruptedTasks();
 });
