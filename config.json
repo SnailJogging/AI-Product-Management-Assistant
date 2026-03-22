@@ -6,10 +6,23 @@
     "explore": true
   },
   "model": {
-    "maxclaw": true
+    "maxclaw": false,
+    "qwen": true
   },
   "explore": {
     "maxSteps": 50,
     "maxDepth": 5
+  },
+  "auth": {
+    "cookies": [],
+    "localStorage": {},
+    "login": {
+      "url": "https://yzc.yaoex.com/login",
+      "username": "17717534756",
+      "password": "qwertyuiop0123456789",
+      "usernameSelector": "input[type=\"text\"], input[type=\"tel\"], input[name=\"username\"], input[name=\"phone\"]",
+      "passwordSelector": "input[type=\"password\"]",
+      "submitSelector": "button[type=\"submit\"], .login-btn, button.btn"
+    }
   }
 }

@@ -1,4 +1,5 @@
 const { callMaxClaw } = require('./maxclawService');
+const { callQwen }    = require('./qwenService');
 
 // ─── taskType → system prompt 映射 ────────────────────────────
 const SYSTEM_PROMPTS = {
@@ -40,16 +41,20 @@ async function callAI(taskType, prompt, options = {}) {
   // 动态读取配置，保证开关实时生效
   const config = require('../config.json');
 
-  if (!config.model.maxclaw) {
-    return { success: false, error: 'No AI model enabled', model: 'none' };
-  }
-
   const systemPrompt = SYSTEM_PROMPTS[taskType] || '你是一个专业的 AI 助手。';
 
-  // 当前版本：全部走 MiniMax
-  const result = await callMaxClaw(prompt, systemPrompt, options);
+  // 模型路由：qwen 优先，其次 maxclaw，都未启用则报错
+  if (config.model.qwen) {
+    const result = await callQwen(prompt, systemPrompt, options);
+    return { ...result, model: 'qwen' };
+  }
 
-  return { ...result, model: 'maxclaw' };
+  if (config.model.maxclaw) {
+    const result = await callMaxClaw(prompt, systemPrompt, options);
+    return { ...result, model: 'maxclaw' };
+  }
+
+  return { success: false, error: '未启用任何 AI 模型，请在侧栏开启 MaxClaw 或 Qwen', model: 'none' };
 }
 
 module.exports = { callAI };

@@ -489,6 +489,16 @@
           <span class="slider"></span>
         </label>
       </div>
+      <div class="toggle-row">
+        <div class="toggle-label">
+          Qwen
+          <small>通义千问 API</small>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="model-qwen" onchange="updateConfig()">
+          <span class="slider"></span>
+        </label>
+      </div>
     </div>
 
     <!-- Webhook 提示 -->
@@ -897,8 +907,9 @@ function applyConfig(cfg) {
   document.getElementById('feat-prd').checked     = cfg.features.prd;
   document.getElementById('feat-analyze').checked = cfg.features.analyze;
   document.getElementById('feat-review').checked  = cfg.features.review;
-  document.getElementById('feat-explore').checked = cfg.features.explore ?? true;
+  document.getElementById('feat-explore').checked  = cfg.features.explore ?? true;
   document.getElementById('model-maxclaw').checked = cfg.model.maxclaw;
+  document.getElementById('model-qwen').checked    = cfg.model.qwen ?? false;
 }
 
 // ── 系统启停 ──────────────────────────────────────────────────
@@ -920,6 +931,7 @@ async function updateConfig() {
     },
     model: {
       maxclaw: document.getElementById('model-maxclaw').checked,
+      qwen:    document.getElementById('model-qwen').checked,
     }
   };
   await fetch('/api/config', {

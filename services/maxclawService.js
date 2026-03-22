@@ -82,19 +82,25 @@ async function callMaxClaw(prompt, systemPrompt, options = {}) {
 }
 
 /**
- * AI 决策：从候选元素列表中选出最有探索价值的一个
+ * AI 决策：从候选元素列表中选出最有业务价值的一个
  * @param {Array<{ text: string, type: string }>} elements
+ * @param {{ pageType?: string, goal?: string }} context  - 升级 prompt 用的上下文（可选，向后兼容）
  * @returns {string|null} 选中的元素文本，失败时返回 null（由调用方 fallback）
  */
-async function decideNextAction(elements) {
+async function decideNextAction(elements, context = {}) {
   if (!elements || elements.length === 0) return null;
 
-  const list = elements.map(e => `- ${e.text}（${e.type}）`).join('\n');
-  const systemPrompt = '你是一个产品经理，负责探索产品的核心业务流程。';
+  const { pageType = 'unknown', goal = '理解系统核心业务流程' } = context;
+  const list         = elements.map(e => `- ${e.text}（${e.type}）`).join('\n');
+  const systemPrompt = '你是一个产品经理，正在探索一个系统的核心业务流程。';
   const prompt =
-    `当前页面有以下操作：\n${list}\n\n` +
-    `目标：\n探索系统的核心业务流程（如创建、提交、查询）\n\n` +
-    `请返回最有价值点击的元素文本（只返回文本，不要任何解释）`;
+    `页面类型：${pageType}\n\n` +
+    `当前操作：\n${list}\n\n` +
+    `目标：\n${goal}\n\n` +
+    `请选出最有"业务价值"的一个操作：\n\n` +
+    `优先：\n- 能推进流程（创建、提交）\n- 能进入新页面\n- 能触发接口\n\n` +
+    `避免：\n- 无意义返回\n- 重复操作\n\n` +
+    `只返回一个操作文本，不要任何解释`;
 
   const result = await callMaxClaw(prompt, systemPrompt, { max_tokens: 50, timeout: 10000 });
   if (!result.success) return null;
